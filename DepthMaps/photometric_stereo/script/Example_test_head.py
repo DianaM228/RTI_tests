@@ -4,9 +4,10 @@ import cv2 as cv
 import time
 import numpy as np
 import glob
+import os
 
 
-root_fold = "/Users/dianamarin/Documents/Cheminova/DethMaps/photometric_stereo/photostereo_py/samples/head/"
+root_fold = "/Users/dianamarin/Documents/Cheminova/DethMaps/photometric_stereo/photostereo_py/samples/head"
 light_manual = False
 list_files = glob.glob(f"{root_fold}/*")
 
@@ -15,6 +16,9 @@ mask_path = [f for f in list_files if "mask" in f][0]
 matrix = [f for f in list_files if "LightMatrix" in f][0]
 IMAGES = len(list_images)
 
+out = os.path.join(os.path.dirname(root_fold),"out",os.path.basename(root_fold))
+if not os.path.exists(out):
+    os.makedirs(out)
 
 
 #Load input image array
@@ -26,7 +30,7 @@ for id in list_images:
     except cv.error as err:
         print(err)
 
-myps = photometry(IMAGES, True)
+myps = photometry(IMAGES, False)
 
 if light_manual:
     # SETTING LIGHTS MANUALLY
@@ -64,8 +68,8 @@ albedo = cv.normalize(albedo, None, 0, 255, cv.NORM_MINMAX, cv.CV_8UC1)
 #gauss = myps.computegaussian()
 #med = myps.computemedian()
 
-cv.imwrite('normal_map.png',normal_map)
-cv.imwrite('albedo.png',albedo)
+cv.imwrite(os.path.join(out,'normal_map.png'),normal_map)
+cv.imwrite(os.path.join(out,'albedo.png'),albedo)
 #cv.imwrite('gauss.png',gauss)
 #cv.imwrite('med.png',med)
 
@@ -73,12 +77,30 @@ toc = time.process_time()
 print("Process duration: " + str(toc - tic))
 
 # TEST: 3d reconstruction
-depth_map = myps.computedepthmap()
-cv.imwrite(root_fold + 'depth_map.png', depth_map)
 
-# myps.computedepth2()
-# myps.display3dobj()
-cv.imshow("normal", normal_map)
+# Depth Map V1
+depth_map = myps.computedepthmap()
+cv.imwrite(os.path.join(out,'depth_map.png'), depth_map)
+
+# Depth  map v2
+
+# depth_map2
+depth_map2 = myps.computedepth2()
+depth_map2_normalized = cv.normalize(depth_map2, None, 0, 255, cv.NORM_MINMAX, cv.CV_8UC1)
+cv.imwrite(os.path.join(out,'depth_map2.png'), depth_map2_normalized)
+
+## Custom deep map 
+depth_map_c = myps.computedepthmap_custom()
+cv.imwrite(os.path.join(out, 'depth_map_poisson.png'), depth_map_c)
+
+
+# Color depth map v2
+depth_map2_colored = cv.applyColorMap(depth_map2_normalized, cv.COLORMAP_JET)
+cv.imwrite(os.path.join(out, 'depth_map2_colored.png'), depth_map2_colored)
+
+
+myps.display3dobj(out)
+#cv.imshow("normal", normal_map)
 #cv.imshow("mean", med)
 #cv.imshow("gauss", gauss)
 cv.waitKey(0)

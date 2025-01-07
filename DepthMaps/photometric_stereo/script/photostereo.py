@@ -1,6 +1,8 @@
 import cv2 as cv
 import numpy as np
 import vtk
+import scipy
+import os
 
 class photometry:
 
@@ -178,6 +180,7 @@ class photometry:
 
         for i in range (1, h):
             for j in range (1, w):
+                # ORIGINAL
                 u = np.sin(i * 2 * np.pi / h)
                 v = np.sin(j * 2 * np.pi / w)
                 uv = np.float_power(u, 2) + np.float_power(v, 2)
@@ -217,12 +220,14 @@ class photometry:
         #self.Z = cv.normalize(Z, None, 0, 10, cv.NORM_MINMAX, cv.CV_32FC1)
         self.Z = np.clip(Z, -10, 10)
         Znorm = cv.normalize(Z, None, 0, 255, cv.NORM_MINMAX, cv.CV_8UC1)
-        cv.imshow('Znorm', Znorm)
-        cv.imshow('Z', Z)
-        cv.waitKey(0)
-        cv.destroyAllWindows()
+        if self.display:
+            cv.imshow('Depth', Z)
+            cv.imshow('Depth norm', Znorm)
+            cv.waitKey(0)
+            cv.destroyAllWindows()
+        return self.Z
 
-    def display3dobj(self):
+    def display3dobj_0(self):
         colors = vtk.vtkNamedColors()
 
         h = self.normalmap.shape[0]
@@ -284,3 +289,91 @@ class photometry:
         stlWriter.SetFilePrefix(filename)
         stlWriter.SetInput(renderWindow)
         stlWriter.Write()
+    
+    def display3dobj(self,path):
+
+        colors = vtk.vtkNamedColors()
+
+        h = self.normalmap.shape[0]
+        w = self.normalmap.shape[1]
+
+        # Create points
+        points = vtk.vtkPoints()
+        for x in range(h):
+            for y in range(w):
+                points.InsertNextPoint(x, y, self.Z[x, y])
+
+        # Create triangles
+        triangles = vtk.vtkCellArray()
+        for i in range(h - 1):
+            for j in range(w - 1):
+                triangle = vtk.vtkTriangle()
+                triangle.GetPointIds().SetId(0, j + (i * w))
+                triangle.GetPointIds().SetId(1, (i + 1) * w + j)
+                triangle.GetPointIds().SetId(2, j + (i * w) + 1)
+                triangles.InsertNextCell(triangle)
+
+                triangle2 = vtk.vtkTriangle()
+                triangle2.GetPointIds().SetId(0, (i + 1) * w + j)
+                triangle2.GetPointIds().SetId(1, (i + 1) * w + j + 1)
+                triangle2.GetPointIds().SetId(2, j + (i * w) + 1)
+                triangles.InsertNextCell(triangle2)
+
+        # Create a polydata object
+        trianglePolyData = vtk.vtkPolyData()
+        trianglePolyData.SetPoints(points)
+        trianglePolyData.SetPolys(triangles)
+
+        # Save as STL file
+        stl_writer = vtk.vtkSTLWriter()
+        stl_writer.SetFileName(os.path.join(path,"output.stl"))  # Replace with your desired filename
+        stl_writer.SetInputData(trianglePolyData)
+        stl_writer.Write()
+
+        print("STL file saved as output.stl")
+
+    def poisson_solver(self, grad_x, grad_y):
+        """
+        Solves the Poisson equation for depth integration based on gradients.
+        """
+        h, w = grad_x.shape
+        laplacian = np.gradient(grad_x, axis=0) + np.gradient(grad_y, axis=1)
+
+        # Create the sparse matrix for the Poisson equation
+        n = h * w
+        A = scipy.sparse.eye(n, format='csr')
+        b = laplacian.ravel()
+
+        # Solve the linear system
+        depth = scipy.sparse.linalg.spsolve(A, b)
+
+        return depth.reshape((h, w))
+
+    def computedepthmap_custom(self):
+        """
+        Computes the depth map using the Poisson solver for gradient integration.
+        """
+        h, w = self.normalmap.shape[:2]
+        P = np.zeros((h, w), dtype=np.float32)
+        Q = np.zeros((h, w), dtype=np.float32)
+        self.Z = np.zeros((h, w), dtype=np.float32)
+
+        # Populate gradients P and Q
+        for i in range(1, h):
+            for j in range(1, w):
+                P[i, j] = self.pgrads[i, j]  # Use the precomputed x-gradient
+                Q[i, j] = self.qgrads[i, j]  # Use the precomputed y-gradient
+
+        # Solve depth integration using the Poisson solver
+        self.Z = self.poisson_solver(P, Q)
+
+        # Normalize the result for visualization
+        z_norm = cv.normalize(self.Z, None, 0, 255, cv.NORM_MINMAX, cv.CV_8U)
+
+        # Optional: Display the depth map
+        if self.display:
+            cv.imshow('Depth Map', z_norm)
+            cv.waitKey(0)
+            cv.destroyAllWindows()
+
+        return z_norm
